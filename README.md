@@ -37,38 +37,78 @@ Inspired by **Born et al. (Cell Reports Methods & IBM Research, 2021)** (*"PaccM
 ## 🔬 Mathematical Formulation
 
 ### 1. Drug Self-Attention Encoder
+
 A SMILES sequence $S = (s_1, s_2, \dots, s_L)$ is tokenized into $L$ chemical tokens. Given token embeddings $\mathbf{E} \in \mathbb{R}^{L \times d}$ and learned positional embeddings $\mathbf{P} \in \mathbb{R}^{L \times d}$:
-$$\mathbf{X}_0 = \mathbf{E} \sqrt{d} + \mathbf{P}$$
-For each Transformer encoder block $l \in [1, N]$:
-$$\mathbf{X}'_l = \mathbf{X}_{l-1} + \text{Dropout}\left(\text{MHA}\left(\text{LN}(\mathbf{X}_{l-1}), \text{LN}(\mathbf{X}_{l-1}), \text{LN}(\mathbf{X}_{l-1})\right)\right)$$
-$$\mathbf{X}_l = \mathbf{X}'_l + \text{Dropout}\left(\text{FFN}\left(\text{LN}(\mathbf{X}'_l)\right)\right)$$
-Yielding contextual drug atom representations: $\mathbf{H}_{\text{drug}} \in \mathbb{R}^{B \times L \times d}$.
+
+$$
+\mathbf{X}_0 = \mathbf{E} \sqrt{d} + \mathbf{P}
+$$
+
+For each Transformer encoder block $l \in \{1, 2, \dots, N\}$:
+
+$$
+\mathbf{Z}_l = \mathbf{X}_{l-1} + \mathrm{Dropout}\left(\mathrm{MHA}\left(\mathrm{LN}(\mathbf{X}_{l-1}), \mathrm{LN}(\mathbf{X}_{l-1}), \mathrm{LN}(\mathbf{X}_{l-1})\right)\right)
+$$
+
+$$
+\mathbf{X}_l = \mathbf{Z}_l + \mathrm{Dropout}\left(\mathrm{FFN}\left(\mathrm{LN}(\mathbf{Z}_l)\right)\right)
+$$
+
+Yielding contextual drug atom representations: $\mathbf{H}_{\mathrm{drug}} = \mathbf{X}_N \in \mathbb{R}^{B \times L \times d}$.
 
 ---
 
 ### 2. Structured Genomic Pathway Encoder
-Rather than a single flat vector, the $128$ landmark cancer genes are partitioned into $K=8$ canonical oncogenic pathways $\mathcal{P}_1, \dots, \mathcal{P}_K$ (16 genes per pathway):
-$$\mathbf{h}_k = \text{GELU}\left(\mathbf{g}_{\mathcal{P}_k} \mathbf{W}_k^{(1)}\right) \mathbf{W}_k^{(2)} + \mathbf{e}_{\text{pathway\_id}}(k) \in \mathbb{R}^d$$
+
+Rather than a single flat vector, the $128$ landmark cancer genes are partitioned into $K=8$ canonical oncogenic pathways $\mathcal{P}_1, \mathcal{P}_2, \dots, \mathcal{P}_K$ (16 genes per pathway). For each pathway $k \in \{1, \dots, K\}$:
+
+$$
+\mathbf{h}_k = \mathrm{GELU}\left(\mathbf{g}_{\mathcal{P}_k} \mathbf{W}_k^{(1)}\right) \mathbf{W}_k^{(2)} + \mathbf{e}_k^{\mathrm{pathway}} \in \mathbb{R}^d
+$$
+
 Biological pathway crosstalk (e.g. RTK activating RAS $\to$ MAPK) is captured via inter-pathway Self-Attention:
-$$\mathbf{H}_{\text{pathway}} = \text{LN}\left(\mathbf{H}_{\text{raw}} + \text{MHA}(\mathbf{H}_{\text{raw}}, \mathbf{H}_{\text{raw}}, \mathbf{H}_{\text{raw}})\right) \in \mathbb{R}^{B \times K \times d}$$
+
+$$
+\mathbf{H}_{\mathrm{pathway}} = \mathrm{LN}\left(\mathbf{H}_{\mathrm{raw}} + \mathrm{MHA}(\mathbf{H}_{\mathrm{raw}}, \mathbf{H}_{\mathrm{raw}}, \mathbf{H}_{\mathrm{raw}})\right) \in \mathbb{R}^{B \times K \times d}
+$$
 
 ---
 
 ### 3. Bi-modal Cross-Attention Mechanics
+
 Information flows bi-directionally across modalities:
 
-$$\mathbf{A}_{\text{drug} \to \text{pathway}} = \text{Softmax}\left(\frac{(\mathbf{H}_{\text{drug}} \mathbf{W}_Q) (\mathbf{H}_{\text{pathway}} \mathbf{W}_K)^T}{\sqrt{d_k}}\right) \in \mathbb{R}^{B \times n_h \times L \times K}$$
-$$\mathbf{C}_{\text{drug}} = \mathbf{A}_{\text{drug} \to \text{pathway}} (\mathbf{H}_{\text{pathway}} \mathbf{W}_V) \in \mathbb{R}^{B \times L \times d}$$
+$$
+\mathbf{A}_{\mathrm{drug} \to \mathrm{pathway}} = \mathrm{Softmax}\left(\frac{(\mathbf{H}_{\mathrm{drug}} \mathbf{W}_Q) (\mathbf{H}_{\mathrm{pathway}} \mathbf{W}_K)^T}{\sqrt{d_k}}\right) \in \mathbb{R}^{B \times n_h \times L \times K}
+$$
 
-$$\mathbf{A}_{\text{pathway} \to \text{drug}} = \text{Softmax}\left(\frac{(\mathbf{H}_{\text{pathway}} \mathbf{W}_{Qp}) (\mathbf{H}_{\text{drug}} \mathbf{W}_{Kp})^T}{\sqrt{d_k}} + \mathbf{M}_{\text{pad}}\right) \in \mathbb{R}^{B \times n_h \times K \times L}$$
-$$\mathbf{C}_{\text{pathway}} = \mathbf{A}_{\text{pathway} \to \text{drug}} (\mathbf{H}_{\text{drug}} \mathbf{W}_{Vp}) \in \mathbb{R}^{B \times K \times d}$$
+$$
+\mathbf{C}_{\mathrm{drug}} = \mathbf{A}_{\mathrm{drug} \to \mathrm{pathway}} (\mathbf{H}_{\mathrm{pathway}} \mathbf{W}_V) \in \mathbb{R}^{B \times L \times d}
+$$
+
+$$
+\mathbf{A}_{\mathrm{pathway} \to \mathrm{drug}} = \mathrm{Softmax}\left(\frac{(\mathbf{H}_{\mathrm{pathway}} \mathbf{W}_{Qp}) (\mathbf{H}_{\mathrm{drug}} \mathbf{W}_{Kp})^T}{\sqrt{d_k}} + \mathbf{M}_{\mathrm{pad}}\right) \in \mathbb{R}^{B \times n_h \times K \times L}
+$$
+
+$$
+\mathbf{C}_{\mathrm{pathway}} = \mathbf{A}_{\mathrm{pathway} \to \mathrm{drug}} (\mathbf{H}_{\mathrm{drug}} \mathbf{W}_{Vp}) \in \mathbb{R}^{B \times K \times d}
+$$
 
 ---
 
 ### 4. Bilinear Multimodal Fusion & Sensitivity Regression
-$$\bar{\mathbf{d}} = \text{MaskedMean}(\mathbf{C}_{\text{drug}} + \mathbf{H}_{\text{drug}}) \in \mathbb{R}^d, \quad \bar{\mathbf{p}} = \text{Mean}(\mathbf{C}_{\text{pathway}} + \mathbf{H}_{\text{pathway}}) \in \mathbb{R}^d$$
-$$\mathbf{u} = \left[ \bar{\mathbf{d}} \,\|\, \bar{\mathbf{p}} \,\|\, |\bar{\mathbf{d}} - \bar{\mathbf{p}}| \,\|\, \bar{\mathbf{d}} \odot \bar{\mathbf{p}} \right] \in \mathbb{R}^{4d}$$
-$$\widehat{\ln(\mathrm{IC}_{50})} = \mathbf{W}_3 \cdot \text{GELU}\left(\text{LN}\left(\mathbf{W}_2 \cdot \text{GELU}\left(\text{LN}\left(\mathbf{W}_1 \mathbf{u}\right)\right)\right)\right)$$
+
+$$
+\bar{\mathbf{d}} = \mathrm{MaskedMean}(\mathbf{C}_{\mathrm{drug}} + \mathbf{H}_{\mathrm{drug}}) \in \mathbb{R}^d, \quad \bar{\mathbf{p}} = \mathrm{Mean}(\mathbf{C}_{\mathrm{pathway}} + \mathbf{H}_{\mathrm{pathway}}) \in \mathbb{R}^d
+$$
+
+$$
+\mathbf{u} = \left[ \bar{\mathbf{d}} \;\|\; \bar{\mathbf{p}} \;\|\; |\bar{\mathbf{d}} - \bar{\mathbf{p}}| \;\|\; \bar{\mathbf{d}} \odot \bar{\mathbf{p}} \right] \in \mathbb{R}^{4d}
+$$
+
+$$
+\widehat{\ln(\mathrm{IC}_{50})} = \mathbf{W}_3 \cdot \mathrm{GELU}\left(\mathrm{LN}\left(\mathbf{W}_2 \cdot \mathrm{GELU}\left(\mathrm{LN}\left(\mathbf{W}_1 \mathbf{u}\right)\right)\right)\right)
+$$
 
 ---
 
